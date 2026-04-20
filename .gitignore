@@ -1,0 +1,19 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+
+draft
+draft.py
+ielts_agent_test.py
+ielts-qwen2.5-3b-q4_k_m.gguf
+sgrade_checkpoint.json
+ielts_lora_adapter
+writting_task2_dataset
