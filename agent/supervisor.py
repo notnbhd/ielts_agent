@@ -36,6 +36,7 @@ Exports
 
 from __future__ import annotations
 
+from typing import Any
 from typing import Annotated, Literal, TypedDict
 
 from langchain_core.messages import BaseMessage
@@ -92,6 +93,7 @@ def build_supervisor_graph(
     model: str,
     examiner_temp: float = 0.1,
     tutor_temp: float    = 0.6,
+    checkpointer: Any | None = None,
 ):
     """
     Compile and return the multi-agent supervisor graph.
@@ -152,7 +154,10 @@ def build_supervisor_graph(
     builder.add_edge("examiner_reconsider", "tutor_lesson_plan")
     builder.add_edge("tutor_lesson_plan",   END)
 
+    if checkpointer is None:
+        checkpointer = MemorySaver()
+
     return builder.compile(
-        checkpointer=MemorySaver(),
+        checkpointer=checkpointer,
         interrupt_before=["evaluate"],   # HITL: user reviews tool results before scoring
     )

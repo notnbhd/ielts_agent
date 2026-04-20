@@ -48,7 +48,15 @@ def main() -> None:
     parser.add_argument(
         "--thread",
         default=f"session_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
-        help="Thread ID for MemorySaver session isolation",
+        help="Thread ID for checkpoint session isolation",
+    )
+    parser.add_argument(
+        "--postgres-uri",
+        default=None,
+        help=(
+            "PostgreSQL URI for persistent LangGraph memory "
+            "(fallback: LANGGRAPH_POSTGRES_URI/POSTGRES_URI/DATABASE_URL)"
+        ),
     )
     args = parser.parse_args()
 
@@ -57,6 +65,7 @@ def main() -> None:
         examiner_temp=args.examiner_temp,
         tutor_temp=args.tutor_temp,
         thread_id=args.thread,
+        postgres_uri=args.postgres_uri,
     )
     cli.run()
 

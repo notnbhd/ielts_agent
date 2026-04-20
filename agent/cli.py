@@ -35,6 +35,7 @@ from agent.display import (
     display_tutor_feedback,
     parse_scores,
 )
+from agent.checkpointing import build_checkpointer
 from agent.schemas import IELTSEvaluation
 from agent.supervisor import SupervisorState, build_supervisor_graph
 from agent.prompts import COMMANDS
@@ -63,7 +64,8 @@ class IELTSCLI:
     model         : Ollama model tag (used by both agents)
     examiner_temp : Examiner sampling temperature (default 0.1 — deterministic scoring)
     tutor_temp    : Tutor sampling temperature (default 0.6 — creative lesson plans)
-    thread_id     : MemorySaver session key — unique per student
+    thread_id     : Checkpoint session key — unique per student
+    postgres_uri  : Optional PostgreSQL URI for persistent LangGraph memory
     """
 
     def __init__(
@@ -72,12 +74,14 @@ class IELTSCLI:
         examiner_temp: float = 0.1,
         tutor_temp: float    = 0.6,
         thread_id: str       = "default",
+        postgres_uri: str | None = None,
     ) -> None:
         self.model = model
         self.thread_id = thread_id
         self.config = {"configurable": {"thread_id": thread_id}}
         self.last_scores: dict[str, float] = {}
         self.last_tutor_feedback: dict = {}
+        self._checkpointer_handle = build_checkpointer(postgres_uri)
 
         console.print(
             f"[cyan]⚡ Building multi-agent graph "
@@ -90,15 +94,24 @@ class IELTSCLI:
                 model=model,
                 examiner_temp=examiner_temp,
                 tutor_temp=tutor_temp,
+                checkpointer=self._checkpointer_handle.checkpointer,
             )
             console.print("[dim]  Testing connection…[/dim]")
             self._run_chat_turn("Hi")
+            console.print(
+                f"[dim]  Memory backend: [bold]{self._checkpointer_handle.backend}[/bold][/dim]"
+            )
             console.print("[green]✓ Multi-agent system ready![/green]\n")
         except Exception as exc:
             console.print(f"[red]✗ Could not initialise: {exc}[/red]")
             console.print("[yellow]  ollama serve  →  start server[/yellow]")
             console.print(f"[yellow]  ollama run {model}  →  pull model[/yellow]")
+            self._checkpointer_handle.close()
             sys.exit(1)
+
+    def _shutdown(self) -> None:
+        """Release checkpointer resources (e.g., Postgres connections)."""
+        self._checkpointer_handle.close()
 
     # ══════════════════════════════════════════════════════════════════════════
     # Graph invocation helpers
@@ -299,8 +312,8 @@ class IELTSCLI:
             border_style="cyan",
         ))
 
-        while True:
-            try:
+        try:
+            while True:
                 user_input = Prompt.ask("\n[bold blue]You[/bold blue]").strip()
                 if not user_input:
                     continue
@@ -317,11 +330,12 @@ class IELTSCLI:
                     )
 
                 self.handle_chat(user_input)
-
-            except KeyboardInterrupt:
-                console.print("\n[yellow]Use /quit to exit.[/yellow]")
-            except EOFError:
-                break
+        except KeyboardInterrupt:
+            console.print("\n[yellow]Use /quit to exit.[/yellow]")
+        except EOFError:
+            pass
+        finally:
+            self._shutdown()
 
     @staticmethod
     def _read_multiline() -> str:

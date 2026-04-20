@@ -35,6 +35,7 @@ Exports
 from __future__ import annotations
 
 import json
+from typing import Any
 from typing import Annotated, Literal, TypedDict
 
 from langchain_core.messages import (
@@ -293,7 +294,7 @@ def critique_router(state: AgentState) -> Literal["evaluate", "__end__"]:
 # Graph factory (single-agent, kept for backward compatibility)
 # ══════════════════════════════════════════════════════════════════════════════
 
-def build_graph(model: str, temperature: float):
+def build_graph(model: str, temperature: float, checkpointer: Any | None = None):
     """Single-agent graph (Examiner only). Use build_supervisor_graph for multi-agent."""
     builder = StateGraph(AgentState)
 
@@ -320,7 +321,10 @@ def build_graph(model: str, temperature: float):
         "__end__":  END,
     })
 
+    if checkpointer is None:
+        checkpointer = MemorySaver()
+
     return builder.compile(
-        checkpointer=MemorySaver(),
+        checkpointer=checkpointer,
         interrupt_before=["evaluate"],
     )
