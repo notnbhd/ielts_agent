@@ -3,8 +3,10 @@ agent/supervisor.py
 ───────────────────
 Multi-agent supervisor — Examiner Agent + Tutor Agent.
 
-No bind_tools() / Ollama tool API is used anywhere. Tools run directly in
-Python via auto_tools_node, so the system works with any Ollama model.
+Hybrid design:
+    - Examiner remains deterministic (tools run directly in Python).
+    - Tutor runs a ReAct planning/tool loop, then exits through
+        structured TutorFeedback formatting.
 
 Workflow
 ────────
@@ -83,6 +85,8 @@ class SupervisorState(TypedDict):
     tutor_challenge:   str   # serialised list[ChallengeSignal] JSON or ""
     examiner_verdict:  str   # "revised" | "held" | ""
     tutor_feedback:    dict  # TutorFeedback.model_dump() or {}
+    tutor_react_steps: list[dict[str, Any]]  # ReAct trace for debug/audit
+    tutor_react_meta:  dict[str, Any]  # timing + fallback metadata
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -93,6 +97,7 @@ def build_supervisor_graph(
     model: str,
     examiner_temp: float = 0.1,
     tutor_temp: float    = 0.6,
+    tutor_react_limit: int = 5,
     checkpointer: Any | None = None,
 ):
     """
@@ -103,6 +108,7 @@ def build_supervisor_graph(
     model         : Ollama model tag used by BOTH agents
     examiner_temp : Low temperature for consistent, objective scoring
     tutor_temp    : Higher temperature for creative, personalised lesson plans
+    tutor_react_limit : Max ReAct loops for Tutor sub-graph safety
     """
     builder = StateGraph(SupervisorState)
 
@@ -118,7 +124,12 @@ def build_supervisor_graph(
         return examiner_reconsider_node(s, model=model, temperature=examiner_temp)
 
     def _tutor_lesson_plan(s):
-        return tutor_lesson_plan_node(s, model=model, temperature=tutor_temp)
+        return tutor_lesson_plan_node(
+            s,
+            model=model,
+            temperature=tutor_temp,
+            max_react_loops=tutor_react_limit,
+        )
 
     # ── Examiner nodes ────────────────────────────────────────────────────────
     builder.add_node("auto_tools", auto_tools_node)

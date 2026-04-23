@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import re
+from typing import Any
 
 from rich import box
 from rich.console import Console
@@ -251,4 +252,67 @@ def display_tutor_feedback(tutor_feedback: dict) -> None:
         border_style="green",
         padding=(1, 2),
     ))
+    console.print()
+
+
+def display_tutor_react_debug(react_steps: list[dict[str, Any]], react_meta: dict[str, Any] | None = None) -> None:
+    """Render Tutor ReAct trace and timing metadata for debugging/audit."""
+    meta = react_meta or {}
+
+    if not react_steps and not meta:
+        console.print("[yellow]No Tutor ReAct trace available yet.[/yellow]")
+        return
+
+    header_lines = [
+        f"[bold]Loop limit:[/bold] {meta.get('loop_limit', '?')}",
+        f"[bold]Steps:[/bold] {meta.get('steps_count', len(react_steps))}",
+        f"[bold]ReAct duration:[/bold] {meta.get('react_duration_ms', 0)} ms",
+        f"[bold]Formatter duration:[/bold] {meta.get('formatter_duration_ms', 0)} ms",
+        f"[bold]Total duration:[/bold] {meta.get('total_duration_ms', 0)} ms",
+        f"[bold]Used fallback:[/bold] {meta.get('used_fallback', False)}",
+    ]
+    react_error = meta.get("react_error", "")
+    if react_error:
+        header_lines.append(f"[bold]ReAct error:[/bold] {react_error}")
+
+    table = Table(box=box.SIMPLE_HEAVY)
+    table.add_column("#", justify="right", width=4)
+    table.add_column("Source", width=9)
+    table.add_column("Type", width=12)
+    table.add_column("Duration", justify="right", width=10)
+    table.add_column("Detail", overflow="fold")
+
+    for step in react_steps:
+        step_type = str(step.get("step_type", "?"))
+        source = str(step.get("source", "?"))
+        duration = step.get("duration_ms", 0)
+        if isinstance(duration, (int, float)):
+            duration_text = f"{duration:.2f} ms"
+        else:
+            duration_text = "-"
+
+        if step_type == "tool_call":
+            detail = f"{step.get('tool', '?')} args={step.get('args', {})}"
+        elif step_type == "tool_result":
+            detail = f"{step.get('tool', '?')} -> {str(step.get('content', ''))[:180]}"
+        else:
+            detail = str(step.get("content", ""))[:180]
+
+        table.add_row(
+            str(step.get("step_index", "?")),
+            source,
+            step_type,
+            duration_text,
+            detail,
+        )
+
+    console.print()
+    console.print(Panel(
+        "\n".join(header_lines),
+        title="Tutor ReAct Meta",
+        title_align="left",
+        border_style="cyan",
+        box=box.ROUNDED,
+    ))
+    console.print(table)
     console.print()

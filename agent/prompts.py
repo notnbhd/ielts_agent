@@ -45,6 +45,7 @@ COMMANDS: dict[str, str] = {
     "/eval":    "Enter essay evaluation mode (Examiner + Tutor agents)",
     "/score":   "Re-display Examiner scores from the last evaluation",
     "/tutor":   "Re-display the Tutor's lesson plan from the last evaluation",
+    "/react":   "Show Tutor ReAct trace and timing metadata from the last evaluation",
     "/history": "Print last N messages  e.g. /history 10  (default 6)",
     "/quit":    "Exit",
 }

@@ -30,6 +30,7 @@ from rich.table import Table
 
 from agent.display import (
     display_evaluation,
+    display_tutor_react_debug,
     display_score_table,
     display_tool_summary,
     display_tutor_feedback,
@@ -52,6 +53,8 @@ _INIT_STATE: dict = {
     "tutor_challenge":   "",
     "examiner_verdict":  "",
     "tutor_feedback":    {},
+    "tutor_react_steps": [],
+    "tutor_react_meta":  {},
 }
 
 
@@ -64,6 +67,7 @@ class IELTSCLI:
     model         : Ollama model tag (used by both agents)
     examiner_temp : Examiner sampling temperature (default 0.1 — deterministic scoring)
     tutor_temp    : Tutor sampling temperature (default 0.6 — creative lesson plans)
+    tutor_react_limit : Max ReAct loops for Tutor planning safety (default 5)
     thread_id     : Checkpoint session key — unique per student
     postgres_uri  : Optional PostgreSQL URI for persistent LangGraph memory
     """
@@ -73,6 +77,7 @@ class IELTSCLI:
         model: str,
         examiner_temp: float = 0.1,
         tutor_temp: float    = 0.6,
+        tutor_react_limit: int = 5,
         thread_id: str       = "default",
         postgres_uri: str | None = None,
     ) -> None:
@@ -81,6 +86,8 @@ class IELTSCLI:
         self.config = {"configurable": {"thread_id": thread_id}}
         self.last_scores: dict[str, float] = {}
         self.last_tutor_feedback: dict = {}
+        self.last_tutor_react_steps: list[dict] = []
+        self.last_tutor_react_meta: dict = {}
         self._checkpointer_handle = build_checkpointer(postgres_uri)
 
         console.print(
@@ -94,6 +101,7 @@ class IELTSCLI:
                 model=model,
                 examiner_temp=examiner_temp,
                 tutor_temp=tutor_temp,
+                tutor_react_limit=tutor_react_limit,
                 checkpointer=self._checkpointer_handle.checkpointer,
             )
             console.print("[dim]  Testing connection…[/dim]")
@@ -209,6 +217,9 @@ class IELTSCLI:
             "[/bold green]\n"
         )
         evaluation, tutor_feedback = self._eval_phase2()
+        state_values = self.graph.get_state(self.config).values
+        self.last_tutor_react_steps = state_values.get("tutor_react_steps", [])
+        self.last_tutor_react_meta = state_values.get("tutor_react_meta", {})
 
         # ── Display Examiner output ───────────────────────────────────────────
         if evaluation:
@@ -277,6 +288,12 @@ class IELTSCLI:
         elif cmd == "/tutor":
             display_tutor_feedback(self.last_tutor_feedback)
 
+        elif cmd == "/react":
+            state_values = self.graph.get_state(self.config).values
+            steps = state_values.get("tutor_react_steps", self.last_tutor_react_steps)
+            meta = state_values.get("tutor_react_meta", self.last_tutor_react_meta)
+            display_tutor_react_debug(steps, meta)
+
         elif cmd.startswith("/history"):
             parts = cmd.split()
             n = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 6
@@ -307,7 +324,8 @@ class IELTSCLI:
             "Agents  : [bold cyan]Examiner[/bold cyan] + [bold green]Tutor[/bold green]\n\n"
             "Type [bold]/eval[/bold] to evaluate an essay  •  "
             "[bold]/help[/bold] for all commands  •  "
-            "[bold]/tutor[/bold] to re-show last lesson plan",
+            "[bold]/tutor[/bold] to re-show lesson plan  •  "
+            "[bold]/react[/bold] to show Tutor trace",
             box=box.DOUBLE,
             border_style="cyan",
         ))
