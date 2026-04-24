@@ -169,3 +169,8 @@ class TutorFeedback(BaseModel):
         default_factory=list,
         description="1–2 sentence rewrites: 'BEFORE: … → AFTER: …'"
     )
+    targeted_exercise: str = Field(
+        default="",
+        description="A short, interactive exercise (e.g., grammar fill-in-the-blanks, verb conjugation, or vocabulary synonym matching) specifically tailored to the student's weaknesses."
+    )
+

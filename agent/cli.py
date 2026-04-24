@@ -48,6 +48,7 @@ _INIT_STATE: dict = {
     "is_eval":           False,
     "tool_results":      {},
     "evaluation":        {},
+    "human_review":      "",
     "critique_feedback": "",
     "revision_count":    0,
     "tutor_challenge":   "",
@@ -148,13 +149,23 @@ class IELTSCLI:
         state = self.graph.get_state(self.config)
         return "evaluate" in (state.next or ())
 
-    def _eval_phase2(self) -> tuple[dict, dict]:
+    def _eval_phase2(self, human_review: str = "") -> tuple[dict, dict]:
         """
         Phase 2: resume from interrupt → Examiner scores →
                  Tutor reviews → (optional challenge) → lesson plan.
         Returns (evaluation_dict, tutor_feedback_dict).
         """
-        result = self.graph.invoke(None, config=self.config)
+        resume_payload = None
+        review_text = human_review.strip()
+        if review_text:
+            resume_payload = {
+                "human_review": review_text,
+                "messages": [HumanMessage(content=(
+                    "Human reviewer note before scoring:\n"
+                    f"{review_text}"
+                ))],
+            }
+        result = self.graph.invoke(resume_payload, config=self.config)
         return result.get("evaluation", {}), result.get("tutor_feedback", {})
 
     # ══════════════════════════════════════════════════════════════════════════
@@ -203,6 +214,10 @@ class IELTSCLI:
         display_tool_summary(tool_results)
         console.print()
 
+        review_notes = console.input(
+            "[bold cyan]Optional review note for Examiner/Tutor (Enter to skip): [/bold cyan]"
+        ).strip()
+
         confirmed = Confirm.ask(
             "[bold yellow]📋 Tool analysis complete. Proceed with Examiner + Tutor scoring?[/bold yellow]",
             default=True,
@@ -216,10 +231,11 @@ class IELTSCLI:
             "\n[bold green]🎓 Phase 2 — Examiner scoring + Tutor lesson planning…"
             "[/bold green]\n"
         )
-        evaluation, tutor_feedback = self._eval_phase2()
+        evaluation, tutor_feedback = self._eval_phase2(review_notes)
         state_values = self.graph.get_state(self.config).values
         self.last_tutor_react_steps = state_values.get("tutor_react_steps", [])
         self.last_tutor_react_meta = state_values.get("tutor_react_meta", {})
+        latest_tutor_feedback = tutor_feedback or state_values.get("tutor_feedback", {})
 
         # ── Display Examiner output ───────────────────────────────────────────
         if evaluation:
@@ -243,9 +259,9 @@ class IELTSCLI:
             display_score_table(self.last_scores)
 
         # ── Display Tutor output ──────────────────────────────────────────────
-        if tutor_feedback:
-            self.last_tutor_feedback = tutor_feedback
-            display_tutor_feedback(tutor_feedback)
+        if latest_tutor_feedback:
+            self.last_tutor_feedback = latest_tutor_feedback
+            display_tutor_feedback(latest_tutor_feedback)
         else:
             # Fallback: print last AI message if no structured feedback
             state = self.graph.get_state(self.config)
@@ -286,12 +302,18 @@ class IELTSCLI:
             display_score_table(self.last_scores)
 
         elif cmd == "/tutor":
-            display_tutor_feedback(self.last_tutor_feedback)
+            state_values = self.graph.get_state(self.config).values
+            feedback = state_values.get("tutor_feedback", {}) or self.last_tutor_feedback
+            if feedback:
+                self.last_tutor_feedback = feedback
+                display_tutor_feedback(feedback)
+            else:
+                console.print("[yellow]Chua co lesson plan cua Tutor. Hay chay /eval truoc.[/yellow]")
 
         elif cmd == "/react":
             state_values = self.graph.get_state(self.config).values
-            steps = state_values.get("tutor_react_steps", self.last_tutor_react_steps)
-            meta = state_values.get("tutor_react_meta", self.last_tutor_react_meta)
+            steps = state_values.get("tutor_react_steps", []) or self.last_tutor_react_steps
+            meta = state_values.get("tutor_react_meta", {}) or self.last_tutor_react_meta
             display_tutor_react_debug(steps, meta)
 
         elif cmd.startswith("/history"):

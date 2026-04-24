@@ -11,7 +11,7 @@ parses the predicted band score, and writes results to a CSV in the expected for
 
 Usage:
     python evaluate_sgrade.py                          # default settings
-    python evaluate_sgrade.py --model ieltstutor       # custom model
+    python evaluate_sgrade.py --model qwen3.5:9B       # custom model
     python evaluate_sgrade.py --output results.csv     # custom output path
     python evaluate_sgrade.py --resume                 # resume from last checkpoint
     python evaluate_sgrade.py --limit 10               # only evaluate first 10 essays
@@ -273,7 +273,7 @@ def main():
     parser = argparse.ArgumentParser(
         description="S-Grade Evaluation for IELTS Writing Task 2"
     )
-    parser.add_argument("--model", default="ieltstutor")
+    parser.add_argument("--model", default="qwen3.5:9B")
     parser.add_argument("--temperature", type=float, default=0.3)
     parser.add_argument("--input", default="writting_task2_dataset/test.csv")
     parser.add_argument("--output", default="sgrade_predictions.csv")

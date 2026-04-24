@@ -107,5 +107,44 @@ def generate_targeted_exercise(topic: str, difficulty: str) -> str:
     return f"Exercise topic={t}, difficulty={d}.\n{body}"
 
 
-TUTOR_TOOLS = [search_student_history, generate_targeted_exercise]
+@tool
+def generate_grammar_exercise(error_context: str, mistake_type: str) -> str:
+    """
+    Generate a highly specific grammar exercise when a student has poor GRA scores.
+    Args:
+        error_context: The sentence or context from the essay containing the grammar error.
+        mistake_type: The type of error (e.g., 'verb conjugation', 'articles', 'prepositions').
+    """
+    return (
+        f"INSTRUCTION FOR FORMATTER MODEL:\n"
+        f"Based on the student's grammar mistake type '{mistake_type}' in the context: '{error_context}',\n"
+        f"create a short, interactive grammar exercise in the 'targeted_exercise' field.\n"
+        f"Include:\n"
+        f"1. A fill-in-the-blank or verb conjugation question directly related to their mistake.\n"
+        f"2. Two additional practice sentences testing the exact same grammar rule.\n"
+        f"3. A brief answer key with a simple explanation of the rule."
+    )
+
+
+@tool
+def generate_vocabulary_exercise(topic: str, overused_words: str) -> str:
+    """
+    Generate a vocabulary extension exercise when a student has poor LR scores.
+    Args:
+        topic: The overall topic of the essay (e.g., 'technology', 'education').
+        overused_words: Basic words the student used too much (e.g., 'good, bad, people, very').
+    """
+    return (
+        f"INSTRUCTION FOR FORMATTER MODEL:\n"
+        f"Based on the essay topic '{topic}', the student overused basic words: '{overused_words}'.\n"
+        f"Create a vocabulary building exercise in the 'targeted_exercise' field.\n"
+        f"Include:\n"
+        f"1. 3-4 advanced synonyms or collocations suitable for '{topic}' that replace the overused words.\n"
+        f"2. A sentence matching or fill-in-the-blanks exercise applying these advanced words.\n"
+        f"3. An answer key."
+    )
+
+
+
+TUTOR_TOOLS = [search_student_history, generate_targeted_exercise, generate_grammar_exercise, generate_vocabulary_exercise]
 TUTOR_TOOL_MAP: dict[str, object] = {tool_.name: tool_ for tool_ in TUTOR_TOOLS}

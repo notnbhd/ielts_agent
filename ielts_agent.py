@@ -6,7 +6,7 @@ Launches the multi-agent IELTS Writing Tutor (Examiner + Tutor).
 Usage
 ─────
   python ielts_agent.py
-  python ielts_agent.py --model ieltstutor --thread student_b22_01
+    python ielts_agent.py --model qwen3.5:9B --thread student_b22_01
   python ielts_agent.py --examiner-temp 0.1 --tutor-temp 0.7
 
 Package layout

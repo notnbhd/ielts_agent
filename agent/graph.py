@@ -68,6 +68,7 @@ class AgentState(TypedDict):
     is_eval:           bool   # True → evaluation flow; False → chat
     tool_results:      dict   # raw JSON strings from tool execution
     evaluation:        dict   # IELTSEvaluation.model_dump() or {}
+    human_review:      str    # optional reviewer note injected at HITL checkpoint
     critique_feedback: str    # non-empty = inconsistencies found
     revision_count:    int    # number of revision passes completed
 
@@ -163,6 +164,7 @@ def evaluate_node(state: AgentState, *, model: str, temperature: float) -> dict:
     """
     llm = _make_llm(model, temperature)
     tool_results      = state.get("tool_results", {})
+    human_review      = state.get("human_review", "")
     critique_feedback = state.get("critique_feedback", "")
 
     summary = _tool_summary(tool_results)
@@ -170,6 +172,12 @@ def evaluate_node(state: AgentState, *, model: str, temperature: float) -> dict:
         "Tool analysis summary (incorporate this data into your scores):",
         summary,
     ]
+    if human_review:
+        inject_parts += [
+            "",
+            "HUMAN REVIEW NOTES (priority guidance to incorporate):",
+            human_review,
+        ]
     if critique_feedback:
         inject_parts += [
             "",
@@ -200,6 +208,7 @@ def evaluate_node(state: AgentState, *, model: str, temperature: float) -> dict:
     return {
         "messages":         [AIMessage(content=ai_content)],
         "evaluation":       evaluation_dict,
+        "human_review":     "",
         "critique_feedback": "",   # reset after each pass
     }
 

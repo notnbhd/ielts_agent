@@ -79,6 +79,7 @@ class SupervisorState(TypedDict):
     is_eval:           bool
     tool_results:      dict
     evaluation:        dict
+    human_review:      str
     critique_feedback: str
     revision_count:    int
     # Tutor fields
@@ -97,6 +98,7 @@ def build_supervisor_graph(
     model: str,
     examiner_temp: float = 0.1,
     tutor_temp: float    = 0.6,
+    tutor_review_mode: Literal["rule", "llm", "hybrid"] = "hybrid",
     tutor_react_limit: int = 5,
     checkpointer: Any | None = None,
 ):
@@ -108,6 +110,7 @@ def build_supervisor_graph(
     model         : Ollama model tag used by BOTH agents
     examiner_temp : Low temperature for consistent, objective scoring
     tutor_temp    : Higher temperature for creative, personalised lesson plans
+    tutor_review_mode : Tutor debate strategy: rule | llm | hybrid (default)
     tutor_react_limit : Max ReAct loops for Tutor sub-graph safety
     """
     builder = StateGraph(SupervisorState)
@@ -119,6 +122,14 @@ def build_supervisor_graph(
 
     def _evaluate(s):
         return evaluate_node(s, model=model, temperature=examiner_temp)
+
+    def _tutor_review(s):
+        return tutor_review_node(
+            s,
+            model=model,
+            temperature=examiner_temp,
+            review_mode=tutor_review_mode,
+        )
 
     def _examiner_reconsider(s):
         return examiner_reconsider_node(s, model=model, temperature=examiner_temp)
@@ -138,7 +149,7 @@ def build_supervisor_graph(
     builder.add_node("critique",   critique_node)
 
     # ── Tutor nodes ───────────────────────────────────────────────────────────
-    builder.add_node("tutor_review",        tutor_review_node)
+    builder.add_node("tutor_review",        _tutor_review)
     builder.add_node("examiner_reconsider", _examiner_reconsider)
     builder.add_node("tutor_lesson_plan",   _tutor_lesson_plan)
 

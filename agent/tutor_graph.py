@@ -2,7 +2,7 @@
 Tutor Agent nodes for the multi-agent supervisor.
 
 Tutor responsibilities:
-  1. Challenge Review (deterministic rules, no LLM)
+    1. Challenge Review (LLM-assisted with deterministic fallback)
   2. Lesson Planning via ReAct (autonomous planning + tool calling)
   3. Structured Exit (final output always validated as TutorFeedback)
 
@@ -27,6 +27,7 @@ from typing import Any
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_ollama import ChatOllama
 from langgraph.prebuilt import create_react_agent
+from pydantic import BaseModel, Field
 from rich.console import Console
 
 from agent.schemas import ChallengeSignal, ExaminerVerdict, TutorFeedback
@@ -63,6 +64,7 @@ You must return valid data matching the TutorFeedback schema exactly:
 - lesson_plan: 3-5 ordered action items
 - next_essay_tips: 2-3 concrete tips
 - rewrite_examples: optional 0-2 rewrite examples
+- targeted_exercise: a customized exercise (e.g., grammar fill-in-the-blanks, verb conjugation, vocabulary matching) based on the ReAct trace.
 
 Ground your plan in the evaluation and ReAct evidence provided.
 """
@@ -77,6 +79,20 @@ Your task: weigh the evidence objectively against the official IELTS descriptors
 - If the score is correct despite the evidence -> maintain it with a clear justification.
 
 Do NOT inflate scores to be kind. Accuracy is paramount.
+"""
+
+_TUTOR_CHALLENGE_SYSTEM = """\
+You are a pedagogical IELTS Writing tutor reviewing whether the examiner may
+have been too strict in any criterion.
+
+You must propose challenges only when there is concrete essay evidence.
+Do not invent evidence. Do not challenge scores unless justification is strong.
+
+Output requirements:
+- Return a list of ChallengeSignal items.
+- criterion must be one of: TA, CC, LR, GRA.
+- suggested_minimum should be current_score or +0.5 at most.
+- Keep evidence concise and specific.
 """
 
 
@@ -103,6 +119,14 @@ _ACADEMIC_WORDS = [
     "approximately", "fundamental", "perspective", "acknowledge", "analyse",
     "evaluate", "justify", "emphasise", "consideration", "alternative",
 ]
+
+_ALLOWED_CRITERIA = {"TA", "CC", "LR", "GRA"}
+_MAX_TUTOR_CHALLENGES = 3
+
+
+class TutorChallengeReview(BaseModel):
+    """Structured payload for Tutor challenge review output."""
+    challenges: list[ChallengeSignal] = Field(default_factory=list)
 
 
 def _clip(text: str, limit: int = 500) -> str:
@@ -395,10 +419,13 @@ def _render_tutor_feedback(feedback: TutorFeedback) -> str:
         lines += ["", "**Rewrite Examples:**"]
         lines += [f"- {example}" for example in feedback.rewrite_examples]
 
+    if getattr(feedback, "targeted_exercise", ""):
+        lines += ["", "**Targeted Exercise:**", feedback.targeted_exercise]
+
     return "\n".join(lines)
 
 
-def _detect_challenges(essay: str, evaluation: dict) -> list[ChallengeSignal]:
+def _detect_challenges_rule_based(essay: str, evaluation: dict) -> list[ChallengeSignal]:
     """
     Produce a list of ChallengeSignals where essay evidence contradicts
     a seemingly low Examiner score. All checks are rule-based.
@@ -452,13 +479,100 @@ def _detect_challenges(essay: str, evaluation: dict) -> list[ChallengeSignal]:
     return challenges
 
 
+def _normalize_challenge(signal: ChallengeSignal) -> ChallengeSignal | None:
+    """Validate and normalize one challenge item from any source."""
+    criterion = (signal.criterion or "").upper().strip()
+    if criterion not in _ALLOWED_CRITERIA:
+        return None
+
+    current = max(0.0, min(9.0, float(signal.current_score)))
+    suggested = max(current, min(9.0, float(signal.suggested_minimum)))
+    # Keep step size aligned with IELTS half bands.
+    suggested = round(suggested * 2) / 2
+    current = round(current * 2) / 2
+
+    # Guardrail: Tutor can only nudge by at most +0.5 per criterion.
+    if suggested > current + 0.5:
+        suggested = round((current + 0.5) * 2) / 2
+
+    return ChallengeSignal(
+        criterion=criterion,
+        current_score=current,
+        suggested_minimum=suggested,
+        evidence=_clip(signal.evidence, 300),
+    )
+
+
+def _detect_challenges_llm(
+    essay: str,
+    evaluation: dict,
+    *,
+    model: str,
+    temperature: float,
+    max_challenges: int,
+) -> tuple[list[ChallengeSignal], str]:
+    """Use LLM structured output to generate pedagogical score challenges."""
+    if not model:
+        return [], "missing model"
+
+    llm = ChatOllama(
+        model=model,
+        temperature=min(max(temperature, 0.0), 0.3),
+        num_predict=1024,
+        num_ctx=4096,
+    )
+
+    prompt = HumanMessage(content=(
+        "Review this IELTS evaluation and essay, then propose only justified challenges.\n\n"
+        f"Evaluation JSON:\n{json.dumps(evaluation, ensure_ascii=False)}\n\n"
+        f"Essay:\n{_clip(essay, 2200)}\n\n"
+        f"Return at most {max_challenges} challenges."
+    ))
+
+    try:
+        llm_structured = llm.with_structured_output(TutorChallengeReview)
+        raw_result = llm_structured.invoke([
+            SystemMessage(content=_TUTOR_CHALLENGE_SYSTEM),
+            prompt,
+        ])
+
+        if isinstance(raw_result, TutorChallengeReview):
+            candidates = raw_result.challenges
+        else:
+            candidates = TutorChallengeReview.model_validate(raw_result).challenges
+
+        normalized: list[ChallengeSignal] = []
+        for candidate in candidates:
+            c = _normalize_challenge(candidate)
+            if c is not None:
+                normalized.append(c)
+            if len(normalized) >= max_challenges:
+                break
+        return normalized, ""
+    except Exception as exc:
+        return [], str(exc)
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # Tutor nodes
 # ══════════════════════════════════════════════════════════════════════════════
 
-def tutor_review_node(state: dict) -> dict:
+def tutor_review_node(
+    state: dict,
+    *,
+    model: str = "",
+    temperature: float = 0.1,
+    review_mode: str = "hybrid",
+    max_challenges: int = _MAX_TUTOR_CHALLENGES,
+) -> dict:
     """
-    TUTOR REVIEW node - checks Examiner scores against essay evidence.
+        TUTOR REVIEW node - checks Examiner scores against essay evidence.
+
+        Modes:
+            - rule   : deterministic-only
+            - llm    : LLM-only structured challenge generation
+            - hybrid : LLM-first, fallback to deterministic rules
+
     Produces a serialised list of ChallengeSignal dicts stored in
     state["tutor_challenge"]. Empty string = no challenge.
     """
@@ -469,17 +583,53 @@ def tutor_review_node(state: dict) -> dict:
         console.print("[dim]Tutor review: no evaluation or essay found, skipping challenges[/dim]")
         return {"tutor_challenge": ""}
 
-    challenges = _detect_challenges(essay_text, evaluation)
+    mode = (review_mode or "hybrid").strip().lower()
+    challenges: list[ChallengeSignal] = []
+    source = "rule"
+
+    if mode == "rule":
+        challenges = _detect_challenges_rule_based(essay_text, evaluation)
+    elif mode == "llm":
+        source = "llm"
+        challenges, llm_error = _detect_challenges_llm(
+            essay_text,
+            evaluation,
+            model=model,
+            temperature=temperature,
+            max_challenges=max_challenges,
+        )
+        if llm_error:
+            console.print(f"[dim yellow]Tutor challenge LLM error: {llm_error}[/dim yellow]")
+    else:
+        source = "llm"
+        llm_challenges, llm_error = _detect_challenges_llm(
+            essay_text,
+            evaluation,
+            model=model,
+            temperature=temperature,
+            max_challenges=max_challenges,
+        )
+        if llm_challenges:
+            challenges = llm_challenges
+        else:
+            source = "rule_fallback"
+            challenges = _detect_challenges_rule_based(essay_text, evaluation)
+            if llm_error:
+                console.print(
+                    f"[dim yellow]Tutor challenge LLM fallback to rules: {llm_error}[/dim yellow]"
+                )
+
+    challenges = challenges[:max_challenges]
 
     if challenges:
         payload = json.dumps([c.model_dump() for c in challenges], ensure_ascii=False)
         console.print(
-            f"[yellow]Tutor raises {len(challenges)} challenge(s): "
+            f"[yellow]Tutor raises {len(challenges)} challenge(s) [{source}]: "
             f"{', '.join(c.criterion for c in challenges)}[/yellow]"
         )
         return {"tutor_challenge": payload}
 
-    console.print("[dim green]Tutor review: no challenges, scores look fair[/dim green]")
+    console.print(f"[dim green]Tutor review [{source}]: no challenges, scores look fair[/dim green]")
     return {"tutor_challenge": ""}
 
 
