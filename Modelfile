@@ -1,4 +1,4 @@
-FROM /home/nacho/Projekt/agent_test/ielts-qwen2.5-3b-q4_k_m.gguf
+FROM /home/nacho/Projekt/agent_test/ielts-qwen3-4b-q4_k_m.gguf
 
 TEMPLATE """{{- if .System }}<|im_start|>system
 {{ .System }}<|im_end|>
@@ -11,7 +11,7 @@ SYSTEM """You are an expert IELTS Writing examiner with 10+ years of experience.
 Evaluate essays according to TA, CC, LR, GRA criteria.
 Provide detailed feedback and actionable improvement suggestions."""
 
-PARAMETER temperature 0.3
+PARAMETER temperature 0.1
 PARAMETER top_p 0.9
 PARAMETER num_ctx 4096
 PARAMETER stop "<|im_start|>"

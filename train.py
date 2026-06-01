@@ -163,7 +163,7 @@ model = AutoModelForCausalLM.from_pretrained(
 )
 model.config.use_cache = False
 print(f"Model dtype    : {model.dtype}")
-print(f"Device map     : {model.hf_device_map}")
+print(f"Device map     : {getattr(model, 'hf_device_map', 'single GPU')}")
 
 # ── 8. VRAM check ────────────────────────────────────────────────────────────
 for i in range(torch.cuda.device_count()):
@@ -233,7 +233,7 @@ trainer = SFTTrainer(
         bf16=False,
 
         # --- Sequence ---
-        max_seq_length=2048,
+        max_seq_length=1024,
         dataset_text_field="text",
         packing=True,
 
@@ -329,7 +329,7 @@ inputs = tokenizer(
     text,
     return_tensors="pt",
     truncation=True,
-    max_length=2048,
+    max_length=1536,
 ).to(model.device)
 
 with torch.no_grad():

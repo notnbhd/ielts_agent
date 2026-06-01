@@ -49,10 +49,10 @@ Evaluate the essay on TA, CC, LR, GRA criteria (band 1.0-9.0, 0.5 steps).
 
 ALWAYS start your response EXACTLY like this:
 ## Band Score: X.X
-### Task Achievement (TA): X.X
-### Coherence and Cohesion (CC): X.X
-### Lexical Resource (LR): X.X
-### Grammatical Range and Accuracy (GRA): X.X
+### Task Achievement (TA): X.0
+### Coherence and Cohesion (CC): X.0
+### Lexical Resource (LR): X.0
+### Grammatical Range and Accuracy (GRA): X.0
 
 Then give brief feedback."""
 
